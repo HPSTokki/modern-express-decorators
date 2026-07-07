@@ -1,17 +1,33 @@
 import { Router, Request, Response, NextFunction } from "express";
-
-type Methods = "get" | "post" | "put" | "delete" | "patch";
-type Handler = (req: Request, res: Response, next: NextFunction) => unknown;
-type Constructor<T = any> = new (...args: any[]) => T;
-type ControllerClass = Constructor<Object>;
-
-const routeMetadata = new Map<Handler, { path: string; method: Methods }>();
-const controllerMetadata = new Map<Constructor, { basePath: string }>();
+import {
+  Handler,
+  Methods,
+  routeMetadata,
+  controllerMetadata,
+  ControllerClass,
+  Constructor,
+  Middleware,
+  ErrorMiddleware,
+  AnyMiddleware,
+} from "./types.js";
 
 function methodDecoratorFactory(method: Methods) {
   return function (path: string) {
     return function (fn: Handler, _context: ClassMethodDecoratorContext): void {
-      routeMetadata.set(fn, { path, method });
+      const existing = routeMetadata.get(fn);
+      if (existing) {
+        routeMetadata.set(fn, {
+          ...existing,
+          path,
+          method,
+        });
+      } else {
+        routeMetadata.set(fn, {
+          path,
+          method,
+          middlewares: [],
+        });
+      }
     };
   };
 }
@@ -27,7 +43,15 @@ export function Controller(basePath: string) {
     target: T,
     _context: ClassDecoratorContext,
   ): T {
-    controllerMetadata.set(target, { basePath });
+    const existing = controllerMetadata.get(target);
+    if (existing) {
+      controllerMetadata.set(target, {
+        ...existing,
+        basePath,
+      });
+    } else {
+      controllerMetadata.set(target, { basePath, middlewares: [] });
+    }
     return target;
   };
 }
@@ -40,6 +64,7 @@ export function registerController(
 
   const controllerMeta = controllerMetadata.get(ControllerClass);
   const basePath = controllerMeta?.basePath ?? "";
+  const controllerMiddlewares = controllerMeta?.middlewares ?? [];
 
   const prototype = Object.getPrototypeOf(instance);
   const methodNames = Object.getOwnPropertyNames(prototype).filter(
@@ -54,6 +79,9 @@ export function registerController(
 
     if (route) {
       const fullPath = normalizePath(basePath, route.path);
+
+      const middlewares = [...controllerMiddlewares, ...route.middlewares];
+
       const handler = async (
         req: Request,
         res: Response,
@@ -71,28 +99,29 @@ export function registerController(
                   ? error.message
                   : "Internal server error",
             });
-            return;
           } else {
             next(error);
           }
         }
       };
 
+      const routeHandler = buildMiddlewareChain(middlewares, handler);
+
       switch (route.method) {
         case "get":
-          router.get(fullPath, handler);
+          router.get(fullPath, routeHandler);
           break;
         case "post":
-          router.post(fullPath, handler);
+          router.post(fullPath, routeHandler);
           break;
         case "put":
-          router.put(fullPath, handler);
+          router.put(fullPath, routeHandler);
           break;
         case "patch":
-          router.patch(fullPath, handler);
+          router.patch(fullPath, routeHandler);
           break;
         case "delete":
-          router.delete(fullPath, handler);
+          router.delete(fullPath, routeHandler);
           break;
       }
     }
@@ -105,6 +134,69 @@ export function createControllerRouter(
   const router = Router();
   registerController(router, ControllerClass);
   return router;
+}
+
+function buildMiddlewareChain(
+  middlewares: AnyMiddleware[],
+  finalHandler: Handler,
+): Handler {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    let index = 0;
+    const nextMiddleware = async (err?: any) => {
+      if (err) {
+        if (index < middlewares.length) {
+          const middleware = middlewares[index];
+          index++;
+          try {
+            if (middleware && isErrorHandler(middleware)) {
+              await (middleware as ErrorMiddleware)(
+                err,
+                req,
+                res,
+                nextMiddleware,
+              );
+            } else {
+              nextMiddleware(err);
+            }
+          } catch (error) {
+            nextMiddleware(error);
+          }
+        } else {
+          next(err);
+        }
+        return;
+      }
+      if (index >= middlewares.length) {
+        try {
+          await finalHandler(req, res, next);
+        } catch (error) {
+          nextMiddleware(error);
+        }
+        return;
+      }
+
+      const middleware = middlewares[index];
+      index++;
+      try {
+        if (middleware) {
+          if (isErrorHandler(middleware)) {
+            nextMiddleware();
+          } else {
+            await (middleware as Middleware)(req, res, nextMiddleware);
+          }
+        } else {
+          nextMiddleware();
+        }
+      } catch (error) {
+        nextMiddleware(error);
+      }
+    };
+    nextMiddleware();
+  };
+}
+
+function isErrorHandler(middleware: AnyMiddleware): boolean {
+  return middleware.length === 4;
 }
 
 function normalizePath(basePath: string, routePath: string): string {
