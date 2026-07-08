@@ -11,6 +11,20 @@ import {
   AnyMiddleware,
 } from "./types.js";
 
+export type {
+  Handler,
+  Methods,
+  routeMetadata,
+  controllerMetadata,
+  ControllerClass,
+  Constructor,
+  Middleware,
+  ErrorMiddleware,
+  AnyMiddleware,
+} from "./types.js";
+
+export { UseMiddleware } from "./middleware.js";
+
 function methodDecoratorFactory(method: Methods) {
   return function (path: string) {
     return function (fn: Handler, _context: ClassMethodDecoratorContext): void {
