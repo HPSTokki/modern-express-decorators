@@ -1,6 +1,6 @@
 {
   "name": "modern-express-decorators",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "A very simple express decorator partly vibecoded and made because I hate long codes a bit",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
