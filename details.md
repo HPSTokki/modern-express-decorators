@@ -14,6 +14,7 @@ Standard Express apps scatter route definitions across files and require repetit
 
 - **Class-based controllers** — group routes under a `@Controller("/prefix")`
 - **HTTP method decorators** — `@Get`, `@Post`, `@Put`, `@Patch`, `@Delete`
+- **Request validation** — validate `body`, `query`, and `params` via Zod-compatible schemas or custom functions (zero extra deps required)
 - **Middleware support** — attach middleswares at the method or controller level via `@UseMiddleware`
 - **Error handling** — built-in async error catching, supports 4-arg error middleswares
 - **Auto-response handling** — returns 204 for `undefined`, pipes streams, respects `__status` for custom status codes
@@ -45,17 +46,82 @@ registerController(router, UserController);
 app.use("/api", router);
 ```
 
+### Validation
+
+Pass a validator as the second argument to any HTTP method decorator. Three styles are supported:
+
+**1. Options object** — validates `body`, `query`, and/or `params` independently:
+
+```ts
+import { z } from "zod";
+import { Post } from "modern-express-decorators";
+
+const createUserSchema = z.object({
+  name: z.string().min(1),
+  email: z.string().email(),
+});
+
+@Post("/users", { body: createUserSchema })
+createUser(req) {
+  // req.body is validated & typed by Zod
+  return { ok: true, user: req.body };
+}
+```
+
+**2. Bare Zod-compatible schema** — pass a schema object directly (auto-detects body validation):
+
+```ts
+const createUserSchema = z.object({ name: z.string() });
+
+@Post("/users", createUserSchema)
+createUser(req) {
+  // req.body is validated
+}
+```
+
+**3. Bare function** — pass a custom validate function directly:
+
+```ts
+@Post("/users", (data) => {
+  if (!data.name) throw new Error("name required");
+  return data;
+})
+createUser(req) {
+  // req.body is validated
+}
+```
+
+For the options object style, you can validate `body`, `query`, and/or `params` independently. The validator can be:
+
+- **A Zod-compatible schema** — any object with a `.parse()` method (Zod, ArkType, Valibot, etc.)
+- **A custom function** — receives the raw value, returns transformed value or throws
+
+```ts
+// Custom function with query
+@Get("/search", {
+  query: (data) => {
+    const q = data as Record<string, string | undefined>;
+    if (!q.q) throw new Error("Search query 'q' is required");
+    return { q: q.q.trim() };
+  }
+})
+search(req) {
+  // (req as any).validatedQuery.q is available
+}
+```
+
+On validation failure, the route returns a **400** response with error details. If the thrown error has an `.issues` array (like `ZodError`), it's included in the response body.
+
 ## Source Structure
 
 | File | Purpose |
 |------|---------|
-| `src/index.ts` | Core exports: decorators, `registerController`, `createControllerRouter`, response helpers |
+| `src/index.ts` | Core exports: decorators, `registerController`, `createControllerRouter`, response helpers, validation |
 | `src/types.ts` | Type definitions and metadata maps (`routeMetadata`, `controllerMetadata`) |
 | `src/middleware.ts` | `@UseMiddleware` decorator (method + class level) |
-| `src/test/` | Manual test files for development |
 
 ## Exports
 
 - **Decorators:** `@Controller`, `@Get`, `@Post`, `@Put`, `@Patch`, `@Delete`, `@UseMiddleware`
 - **Functions:** `registerController`, `createControllerRouter`
-- **Types:** `Handler`, `Methods`, `Middleware`, `ErrorMiddleware`, `AnyMiddleware`, `routeMetadata`, `controllerMetadata`, `ControllerClass`, `Constructor`
+- **Types:** `Handler`, `Methods`, `Middleware`, `ErrorMiddleware`, `AnyMiddleware`, `RouteOptions`, `ValidationSchema`, `routeMetadata`, `controllerMetadata`, `ControllerClass`, `Constructor`

@@ -515,3 +515,241 @@ describe("plain object fallback", () => {
     expect(res.body).toEqual({ a: 1, b: [2, 3] });
   });
 });
+
+describe("validation", () => {
+  describe("custom validate function", () => {
+    @Controller("/validate/fn")
+    class FnValidationController {
+      @Post("/body", {
+        body: (data: unknown) => {
+          if (typeof data !== "object" || data === null) throw new Error("Body must be an object");
+          if (!("name" in (data as Record<string, unknown>))) throw new Error("name is required");
+          return data;
+        },
+      })
+      bodyValid(req: Request) {
+        return { received: req.body };
+      }
+
+      @Post("/body-fail", {
+        body: () => { throw new Error("always fails"); },
+      })
+      bodyFail() {
+        return { should: "not-reach" };
+      }
+
+      @Get("/query", {
+        query: (data: unknown) => {
+          const q = data as Record<string, unknown>;
+          if (typeof q.page !== "string") throw new Error("page is required");
+          return { ...q, page: parseInt(q.page, 10) };
+        },
+      })
+      queryValid(req: Request) {
+        return { page: (req as any).validatedQuery.page };
+      }
+
+      @Get("/query-fail", {
+        query: () => { throw new Error("query failed"); },
+      })
+      queryFail() {
+        return { should: "not-reach" };
+      }
+
+      @Get("/params/:id", {
+        params: (data: unknown) => {
+          const p = data as Record<string, unknown>;
+          if (!p.id) throw new Error("id param required");
+          return p;
+        },
+      })
+      paramsValid(req: Request) {
+        return { id: (req as any).validatedParams.id };
+      }
+    }
+
+    const fnApp = (() => {
+      const a = express();
+      a.use(express.json());
+      registerController(a, FnValidationController);
+      return a;
+    })();
+
+    it("passes validated body", async () => {
+      const res = await request(fnApp).post("/validate/fn/body").send({ name: "Alice" });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ received: { name: "Alice" } });
+    });
+
+    it("returns 400 when body validation fails", async () => {
+      const res = await request(fnApp).post("/validate/fn/body-fail").send({});
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty("error", "Validation failed");
+    });
+
+    it("passes validated query", async () => {
+      const res = await request(fnApp).get("/validate/fn/query?page=5");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ page: 5 });
+    });
+
+    it("returns 400 when query validation fails", async () => {
+      const res = await request(fnApp).get("/validate/fn/query-fail");
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty("error", "Validation failed");
+    });
+
+    it("passes validated params", async () => {
+      const res = await request(fnApp).get("/validate/fn/params/42");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ id: "42" });
+    });
+  });
+
+  describe("Zod-compatible schema (object with .parse)", () => {
+    const schema = {
+      parse: (data: unknown) => {
+        if (typeof data !== "object" || data === null) throw new Error("not an object");
+        const d = data as Record<string, string>;
+        if (!d.name) throw new Error("name required");
+        return { ...d, name: d.name.toUpperCase() };
+      },
+    };
+
+    @Controller("/validate/schema")
+    class SchemaValidationController {
+      @Post("/body", { body: schema })
+      bodyValid(req: Request) {
+        return { name: req.body.name };
+      }
+
+      @Post("/fail", { body: schema })
+      bodyFail() {
+        return { should: "not-reach" };
+      }
+    }
+
+    const sApp = (() => {
+      const a = express();
+      a.use(express.json());
+      registerController(a, SchemaValidationController);
+      return a;
+    })();
+
+    it("transforms and passes validated data", async () => {
+      const res = await request(sApp).post("/validate/schema/body").send({ name: "alice" });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ name: "ALICE" });
+    });
+
+    it("returns 400 when schema.parse throws", async () => {
+      const res = await request(sApp).post("/validate/schema/fail").send({});
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty("error", "Validation failed");
+    });
+  });
+
+  describe("ZodError-like detection (object with .issues)", () => {
+    const zodLikeError = Object.assign(new Error("zod error"), {
+      issues: [
+        { path: ["name"], message: "Required", code: "invalid_type" },
+      ],
+    });
+
+    @Controller("/validate/zod")
+    class ZodLikeController {
+      @Post("/fail", {
+        body: () => { throw zodLikeError; },
+      })
+      fail() {
+        return { should: "not-reach" };
+      }
+    }
+
+    const zApp = (() => {
+      const a = express();
+      a.use(express.json());
+      registerController(a, ZodLikeController);
+      return a;
+    })();
+
+    it("includes .issues in 400 response for Zod-like errors", async () => {
+      const res = await request(zApp).post("/validate/zod/fail").send({});
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty("error", "Validation failed");
+      expect(res.body).toHaveProperty("issues");
+      expect(res.body.issues).toEqual([
+        { path: ["name"], message: "Required", code: "invalid_type" },
+      ]);
+    });
+  });
+
+  describe("bare schema (without { body: ... } wrapper)", () => {
+    const bareSchema = {
+      parse: (data: unknown) => {
+        if (typeof data !== "object" || data === null) throw new Error("not object");
+        const d = data as Record<string, unknown>;
+        if (!d.name) throw new Error("name required");
+        return { ...d, name: String(d.name).toUpperCase() };
+      },
+    };
+    const bareFn = (data: unknown) => {
+      if (typeof data !== "object" || data === null) throw new Error("not object");
+      return data;
+    };
+
+    @Controller("/validate/bare")
+    class BareValidationController {
+      @Post("/schema", bareSchema)
+      bareSchema(req: Request) {
+        return { name: req.body.name };
+      }
+
+      @Post("/schema-fail", bareSchema)
+      bareSchemaFail() {
+        return { should: "not-reach" };
+      }
+
+      @Post("/fn", bareFn)
+      bareFn(req: Request) {
+        return { received: req.body };
+      }
+
+      @Post("/fn-fail", bareFn)
+      bareFnFail() {
+        return { should: "not-reach" };
+      }
+    }
+
+    const bApp = (() => {
+      const a = express();
+      a.use(express.json());
+      registerController(a, BareValidationController);
+      return a;
+    })();
+
+    it("passes a bare ValidationSchema as body validator", async () => {
+      const res = await request(bApp).post("/validate/bare/schema").send({ name: "alice" });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ name: "ALICE" });
+    });
+
+    it("rejects when bare schema validation fails", async () => {
+      const res = await request(bApp).post("/validate/bare/schema-fail").send({});
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty("error", "Validation failed");
+    });
+
+    it("passes a bare function as body validator", async () => {
+      const res = await request(bApp).post("/validate/bare/fn").send({ x: 1 });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ received: { x: 1 } });
+    });
+
+    it("rejects when bare function validation fails", async () => {
+      const res = await request(bApp).post("/validate/bare/fn-fail").send("oops");
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty("error", "Validation failed");
+    });
+  });
+});

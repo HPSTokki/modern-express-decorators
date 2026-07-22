@@ -1,6 +1,34 @@
 # Changelog
 
-## v1.2.2 → current
+## v1.3.0 → current
+
+### Request validation on decorators
+
+**Problem:** The library had no built-in way to validate incoming request data. Users had to write manual validation inside every handler.
+
+**Change:** Added optional request validation as a second argument to HTTP method decorators (`@Get`, `@Post`, etc.). Design goals:
+
+- **Zero required dependencies** — no validation library is bundled. Users bring their own.
+- **Zod-compatible** — accepts any object with a `.parse()` method (works with Zod, ArkType, Valibot, etc.).
+- **Custom function support** — users can pass a plain `(data) => transformedData | never` function for Joi/Yup/manual validation.
+- **Per-part validation** — `body`, `query`, and `params` can each have their own schema.
+- **ZodError detection** — if the thrown error has an `.issues` array (like `ZodError`), it's forwarded in the 400 response body.
+- **Transformation** — validated/transformed data replaces `req.body` is available at `(req as any).validatedQuery` and `(req as any).validatedParams`.
+
+**`src/index.ts` changes:**
+- `methodDecoratorFactory` now accepts an optional second `RouteOptions` argument
+- Added `runValidation` and `validateValue` helpers that run before the handler
+- Exported new types: `RouteOptions`, `ValidationSchema`
+
+**`src/types.ts` changes:**
+- Added `ValidationSchema` interface and `RouteOptions` type
+- Updated `routeMetadata` value type to include optional `options`
+
+**Test coverage:** 8 new tests covering custom functions, Zod-like schemas, ZodError detection, and body/query/params validation success + failure paths (41 total).
+
+---
+
+## v1.2.2
 
 ### Expanded `sendResult` type coverage
 

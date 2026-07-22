@@ -9,6 +9,8 @@ import {
   Middleware,
   ErrorMiddleware,
   AnyMiddleware,
+  type RouteOptions,
+  type ValidationSchema,
 } from "./types.js";
 
 export type {
@@ -21,29 +23,43 @@ export type {
   Middleware,
   ErrorMiddleware,
   AnyMiddleware,
+  RouteOptions,
+  ValidationSchema,
 } from "./types.js";
 
 export { UseMiddleware } from "./middleware.js";
 
+type RouteArg = RouteOptions | ValidationSchema | ((data: unknown) => unknown);
+
 function methodDecoratorFactory(method: Methods) {
-  return function (path: string) {
+  return function (path: string, arg?: RouteArg) {
     return function (fn: Handler, _context: ClassMethodDecoratorContext): void {
+      const options = normalizeArg(arg);
       const existing = routeMetadata.get(fn);
       if (existing) {
         routeMetadata.set(fn, {
           ...existing,
           path,
           method,
+          ...(options ? { options } : {}),
         });
       } else {
         routeMetadata.set(fn, {
           path,
           method,
           middlewares: [],
+          ...(options ? { options } : {}),
         });
       }
     };
   };
+}
+
+function normalizeArg(arg?: RouteArg): RouteOptions | undefined {
+  if (!arg) return undefined;
+  if (typeof arg === "function") return { body: arg };
+  if ("parse" in arg) return { body: arg as ValidationSchema };
+  return arg as RouteOptions;
 }
 
 export const Get = methodDecoratorFactory("get");
@@ -102,6 +118,12 @@ export function registerController(
         next: NextFunction,
       ) => {
         try {
+          if (route.options) {
+            const validationError = runValidation(req, route.options);
+            if (validationError) {
+              return res.status(400).json(validationError);
+            }
+          }
           const result = await method.call(instance, req, res, next);
           await sendResult(res, result);
         } catch (error) {
@@ -323,6 +345,41 @@ async function sendResult(res: Response, result: unknown): Promise<void> {
   }
 
   res.json(result);
+}
+
+function runValidation(
+  req: Request,
+  options: RouteOptions,
+): Record<string, unknown> | undefined {
+  try {
+    if (options.body) {
+      req.body = validateValue(req.body, options.body);
+    }
+    if (options.query) {
+      (req as any).validatedQuery = validateValue(req.query, options.query);
+    }
+    if (options.params) {
+      (req as any).validatedParams = validateValue(req.params, options.params);
+    }
+  } catch (err: unknown) {
+    if (err && typeof err === "object" && "issues" in err) {
+      return { error: "Validation failed", issues: (err as any).issues };
+    }
+    return {
+      error: "Validation failed",
+      details: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+function validateValue(
+  data: unknown,
+  schema: ValidationSchema | ((data: unknown) => unknown),
+): unknown {
+  if (typeof schema === "function") {
+    return schema(data);
+  }
+  return schema.parse(data);
 }
 
 function isStatusResult(

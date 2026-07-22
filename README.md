@@ -47,7 +47,7 @@ app.use("/api", router);
 
 ## To be added features:
 
-- DTO/Validation Schema on decorators
+- ~~DTO/Validation Schema on decorators~~ ✅
 - Middleware Support (though one can pass on function itself)
 - Performance enhancement
 - Probably automatically allowing OpenAPI documentation support(?)

@@ -36,9 +36,11 @@ registerController(router, Class)
 
 From README and code gaps:
 
-1. **DTO / Validation Schema on decorators**  
-   - e.g. `@Post("/", { schema: z.object({...}) })` with Zod or similar  
-   - Auto-validate `req.body` / `req.query` / `req.params` before handler runs
+1. **DTO / Validation Schema on decorators** ✅  
+   - Three passing styles: `{ body, query, params }` object, bare Zod-compatible schema, or bare function  
+   - Validates `req.body`, `req.query`, `req.params` before handler runs  
+   - Returns 400 with ZodError `.issues` when detected  
+   - Zero extra dependencies required
 
 2. **Middleware Improvements**  
    - `@UseMiddleware` works but needs more ergonomic patterns for middleware reuse  
