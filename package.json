@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsup src/index.ts --format esm --clean && tsc --emitDeclarationOnly --outDir dist",
     "prepare": "npm run build"
   },
   "keywords": [
@@ -22,6 +22,7 @@
   "devDependencies": {
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
+    "tsup": "^8.5.1",
     "tsx": "^4.22.5",
     "typescript": "^6.0.3"
   },
