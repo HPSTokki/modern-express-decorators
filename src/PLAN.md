@@ -52,8 +52,10 @@ From README and code gaps:
    - Needs path, method, response shape, and parameter info on each decorator
 
 5. **Testing**  
-   - Currently only ad-hoc manual test files under `src/test/`  
-   - Need proper unit/integration tests (Vitest or Node test runner)
+   - Vitest 3.x test suite in `src/index.test.ts` using supertest  
+   - 33 tests covering all HTTP methods, sendResult edge cases, middleware, path normalization, and standalone routers  
+   - Run with `npm test` (vitest run)  
+   - **Note:** vitest 4+ (oxc) does not support TC39 Stage 3 decorators — must use vitest 3.x (esbuild) for now
 
 ## Known Issues / Edge Cases
 
@@ -61,7 +63,7 @@ From README and code gaps:
 - Controllers cannot receive constructor arguments (pure DI not supported)
 - No support for `app.route()` chaining or regex paths
 - Error middleware detection relies on `fn.length === 4` (standard but brittle if defaults are used)
-- **`sendResult` coverage is incomplete** — currently handles: `undefined`, `null`, `Buffer`, `ReadableStream`, `string`, `{ __status }` objects, and plain objects. Missing: `Uint8Array`/typed arrays, `ArrayBuffer`, `Blob`, `URL`, `Error` instances (should 500 on those), `Map`/`Set` (currently JSON-serialized via `res.json` which works but may be surprising), `BigInt` (will throw in JSON), async iterables, and `Response` (Web API). Should either add explicit handling or document the fallback behaviour clearly.
+- **`sendResult` now handles all common types:** `undefined` (204), `null`, `Error` (500), `Buffer`, `Uint8Array`, `ArrayBuffer`, `Blob`, `ReadableStream`, async iterables, Web `Response`, `string`, `{ __status }` objects, `URL`, `BigInt`, `Map`, `Set`, and plain objects (fallback `res.json`).
 
 ## Development
 

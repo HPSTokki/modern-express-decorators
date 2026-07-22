@@ -1,4 +1,4 @@
-import { Router, Request, Response, NextFunction } from "express";
+import { Router, Request, type Response, NextFunction } from "express";
 import {
   Handler,
   Methods,
@@ -237,13 +237,57 @@ async function sendResult(res: Response, result: unknown): Promise<void> {
     return;
   }
 
+  if (result instanceof Error) {
+    console.error(`Error in handler:`, result);
+    res.status(500).json({
+      error: result.message || "Internal server error",
+    });
+    return;
+  }
+
   if (Buffer.isBuffer(result)) {
     res.send(result);
     return;
   }
 
+  if (result instanceof Uint8Array) {
+    res.send(Buffer.from(result));
+    return;
+  }
+
+  if (result instanceof ArrayBuffer) {
+    res.send(Buffer.from(result));
+    return;
+  }
+
+  if (typeof Blob !== "undefined" && result instanceof Blob) {
+    const buffer = Buffer.from(await result.arrayBuffer());
+    res.send(buffer);
+    return;
+  }
+
   if (isReadableStream(result)) {
     result.pipe(res);
+    return;
+  }
+
+  if (isAsyncIterable(result)) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of result) {
+      chunks.push(
+        typeof chunk === "string" ? Buffer.from(chunk) : Buffer.from(chunk),
+      );
+    }
+    res.send(Buffer.concat(chunks));
+    return;
+  }
+
+  if (typeof Response !== "undefined" && result instanceof Response) {
+    const body = await result.text();
+    res
+      .status(result.status)
+      .type(result.headers.get("content-type") ?? "text/plain")
+      .send(body);
     return;
   }
 
@@ -258,9 +302,23 @@ async function sendResult(res: Response, result: unknown): Promise<void> {
     return;
   }
 
-  if (typeof result === "object" && result !== null && "__status" in result) {
-    const { __status, ...data } = result as { __status: number };
-    res.status(__status).json(data);
+  if (result instanceof URL) {
+    res.send(result.toString());
+    return;
+  }
+
+  if (typeof result === "bigint") {
+    res.send(result.toString());
+    return;
+  }
+
+  if (result instanceof Map) {
+    res.json(Object.fromEntries(result));
+    return;
+  }
+
+  if (result instanceof Set) {
+    res.json(Array.from(result));
     return;
   }
 
@@ -283,5 +341,15 @@ function isReadableStream(value: unknown): value is NodeJS.ReadableStream {
     typeof value === "object" &&
     value !== null &&
     typeof (value as { pipe?: unknown }).pipe === "function"
+  );
+}
+
+function isAsyncIterable(
+  value: unknown,
+): value is AsyncIterable<string | Uint8Array> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Symbol.asyncIterator in value
   );
 }

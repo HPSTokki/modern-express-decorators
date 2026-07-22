@@ -1,6 +1,39 @@
 # Changelog
 
-## v1.2.1 → current
+## v1.2.2 → current
+
+### Expanded `sendResult` type coverage
+
+**Problem:** `sendResult` only handled `undefined`, `null`, `Buffer`, `ReadableStream`, `string`, `{ __status }` objects, and plain objects. Missing types like `Uint8Array`, `Blob`, `Error`, `BigInt`, `Map`/`Set`, async iterables, Web `Response`, etc. would either fall through to `res.json` (risking serialization errors) or go unhandled.
+
+**Change:** Added explicit handling for all missing edge cases in `src/index.ts:sendResult`:
+
+- `Error` → 500 response with `.message`
+- `Uint8Array` → sent as `Buffer`
+- `ArrayBuffer` → sent as `Buffer`
+- `Blob` → converted via `arrayBuffer()` then sent
+- Async iterables → collected and concatenated as `Buffer`
+- Web `Response` → status + content-type + body forwarded
+- `URL` → `.toString()` sent as string
+- `BigInt` → `.toString()` sent as string
+- `Map` → converted to object via `Object.fromEntries`
+- `Set` → converted to array via `Array.from`
+
+Also removed a dead duplicate `__status` check and fixed an `import type` conflict with the global Web `Response` constructor.
+
+### Vitest test suite
+
+Added 33 tests using Vitest 3 + supertest covering all HTTP method decorators, `sendResult` edge cases, middleware chains, error middleware, path normalization, and standalone routers. Run with `npm test`.
+
+**Note:** Pinned to vitest 3.x — vitest 4+ uses oxc which doesn't support TC39 Stage 3 decorators yet.
+
+### TypeScript version
+
+Locked to `^6.0.3` (stable). The setup is verified clean on TS 6 and designed to work with TS 7+ when upgrading (just update the version — no config changes needed).
+
+---
+
+## v1.2.1
 
 ### Restructured source into single-file bundle
 
@@ -34,7 +67,3 @@ All internal imports already use `./` relative prefixes (`./types.js`, `./middle
 ### Excluded `src/test` from declarations
 
 Added `"src/test"` to tsconfig `exclude` to prevent test files from generating `.d.ts` files in `dist/`.
-
-### TypeScript version
-
-Locked to `^6.0.3` (stable). The setup is verified clean on TS 6 and designed to work with TS 7+ when upgrading (just update the version — no config changes needed).
